@@ -8,7 +8,7 @@ co_ed_sports = ['Cricket']
 
 # Tuple is (Teams per house, Players per team)
 group_a_boys_capacities = {'Football': (8, 10), 'Volleyball (boys)': (4, 10)}
-group_a_girls_capacities = {'Football': (4, 10), 'Throwball (girls)': (2, 10)}
+group_a_girls_capacities = {'Football': (1, 10), 'Throwball (girls)': (2, 10)}
 
 group_b_boys_capacities = {'Basketball': (4, 8), 'Ultimate Frisbee': (4, 10)}
 group_b_girls_capacities = {'Basketball': (2, 8), 'Ultimate Frisbee': (2, 10)}

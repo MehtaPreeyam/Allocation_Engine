@@ -27,6 +27,8 @@ def count_members_in_house(houses):
 def organize_data_by_gender_and_sport(df):
     # Initialize the nested dictionary
     gender_dict = defaultdict(lambda: defaultdict(list))
+    individual_sport_gender_dict = defaultdict(lambda: defaultdict(list))
+    individual_sport_ordering = defaultdict(list)
     
     # Iterate through the rows of the DataFrame
     for _, row in df.iterrows():
@@ -49,6 +51,21 @@ def organize_data_by_gender_and_sport(df):
             sport = row[col]
             if sport != "NONE of the above" and pd.notna(sport) and sport.strip():
                 gender_dict[gender][sport].append(user_info)
+        
+        group_c_or_d = row["Choose Group C or Group D?"]
+        if('Group C' in group_c_or_d):
+            for col in ["Group C preference 1", "Group C preference 2", "Group C preference 3"]:
+                sport = row[col]
+                if sport != "NONE of the above" and pd.notna(sport) and sport.strip():
+                    individual_sport_gender_dict[gender][sport].append(user_info)
+                    yfid = user_info['Youth Festival ID']
+                    individual_sport_ordering[yfid].append(sport)
+        elif('Group D' in group_c_or_d):
+            for col in ["Group D preference 1", "Group D preference 2"]:
+                sport = row[col]
+                if sport != "NONE of the above" and pd.notna(sport) and sport.strip():
+                    individual_sport_gender_dict[gender][sport].append(user_info)
+                    individual_sport_ordering[yfid].append(sport)
     
     return gender_dict
 
@@ -75,9 +92,13 @@ def sort_members_by_priority(member_list):
     
     return final_list
 
-def allocate_members_to_houses(members_dict):
+def allocate_members_to_houses(members_dict, df):
     # Initialize house allocations
-    house_allocations = {}
+    house_allocations = {
+        row['Youth Festival ID:']: row['House']
+        for _, row in df.iterrows()
+        if pd.notna(row['House'])  # Only consider rows with valid House Allotments
+    }
 
     # Combine capacities for ease of access
     capacities = {
@@ -95,80 +116,51 @@ def allocate_members_to_houses(members_dict):
         for house in HOUSE_COLORS
     }
 
-    # Shuffle house order for fair assignment
-    house_order = HOUSE_COLORS[:]
-    random.shuffle(house_order)
+    for _, row in df.iterrows():
+        if pd.notna(row['House']):
+            house = row['House']
+            gender = row['Gender:']
+            for sport in capacities[gender]:
+                # Reduce available slots based on pre-allocation
+                if sport in members_dict[gender]:
+                    for member in members_dict[gender][sport]:
+                        if member['Youth Festival ID'] == row['Youth Festival ID:']:
+                            available_slots[house][gender][sport] -= 1
 
     # Assignment process
-    # member_dict = {gender: sport: [users_who_want_to_play]}
-    male_sport_allocation_ordering = ['Football', 'Basketball', 'Volleyball (boys)', 'Ultimate Frisbee']
-    female_sport_allocation_ordering = ['Football', 'Ultimate Frisbee', 'Basketball', 'Throwball (girls)']
-    co_ed_sports_allocation_ordering = ['Cricket']
+    # Priority ordering lists
+    sport_allocation_ordering = {
+        "Co-Ed": ['Cricket'],
+        "Male": ['Football', 'Basketball', 'Volleyball (boys)', 'Ultimate Frisbee'],
+        "Female": ['Football', 'Ultimate Frisbee', 'Basketball', 'Throwball (girls)']
+    }
 
-    gender = 'Female'
-    for sport in female_sport_allocation_ordering:
-        members_in_sport = members_dict[gender][sport]
-        sorted_members = sort_members_by_priority(members_in_sport)
-        for member in sorted_members:
-            if member['Youth Festival ID'] in house_allocations:
-                continue
-            allocated = False
-            tried_alloc = 0
-            while not allocated and tried_alloc < 4:
-                house = house_order.pop(0)
-                slots_left = available_slots[house][gender][sport]
-                if slots_left > 0:
-                    allocated = True
-                    house_allocations[member['Youth Festival ID']] = house
-                    available_slots[house][gender][sport] = available_slots[house][gender][sport] - 1
-                house_order.append(house)
-                tried_alloc += 1
-            if not allocated:
-                print(f'Unable to allocate member {member} to sport {sport}')
+    for gender, sports_order in sport_allocation_ordering.items():
+        for sport in sports_order:
+            members_in_sport = members_dict.get(gender, {}).get(sport, [])
+            if gender == "Co-Ed":
+                members_in_sport = members_dict['Male'].get(sport, []) + members_dict['Female'].get(sport, [])
 
-    gender = 'Male'
-    for sport in male_sport_allocation_ordering:
-        members_in_sport = members_dict[gender][sport]
-        sorted_members = sort_members_by_priority(members_in_sport)
-        for member in sorted_members:
-            if member['Youth Festival ID'] in house_allocations:
-                continue
-            allocated = False
-            tried_alloc = 0
-            while not allocated and tried_alloc < 4:
-                house = house_order.pop(0)
-                slots_left = available_slots[house][gender][sport]
-                if slots_left > 0:
-                    allocated = True
-                    house_allocations[member['Youth Festival ID']] = house
-                    available_slots[house][gender][sport] = available_slots[house][gender][sport] - 1
-                house_order.append(house)
-                tried_alloc += 1
-            if not allocated:
-                print(f'Unable to allocate member {member} to sport {sport}')
+            sorted_members = sort_members_by_priority(members_in_sport)
+            for member in sorted_members:
+                if member['Youth Festival ID'] in house_allocations:
+                    continue
 
-    gender = 'Co-Ed'
-    for sport in co_ed_sports_allocation_ordering:
-        members_in_sport = members_dict['Male'][sport] + members_dict['Female'][sport]
-        sorted_members = sort_members_by_priority(members_in_sport)
-        for member in sorted_members:
-            if member['Youth Festival ID'] in house_allocations:
-                continue
-            allocated = False
-            tried_alloc = 0
-            while not allocated and tried_alloc < 4:
-                house = house_order.pop(0)
-                slots_left = available_slots[house][gender][sport]
-                if slots_left > 0:
-                    allocated = True
-                    house_allocations[member['Youth Festival ID']] = house
-                    available_slots[house][gender][sport] = available_slots[house][gender][sport] - 1
-                house_order.append(house)
-                tried_alloc += 1
-            if not allocated:
-                print(f'Unable to allocate member {member} to sport {sport}')
+                # Allocate to the house with the most slots left for this sport
+                target_house = max(
+                    HOUSE_COLORS,
+                    key=lambda house: available_slots[house][gender][sport]
+                )
+
+                # Check if the house has available slots
+                if available_slots[target_house][gender][sport] > 0:
+                    house_allocations[member['Youth Festival ID']] = target_house
+                    available_slots[target_house][gender][sport] -= 1
+                else:
+                    print(f"Unable to allocate member {member} to sport {sport}")
 
     return house_allocations
+
 
 def create_house_gender_sport_map(sports_by_gender, house_allocations):
     house_gender_sport_map = defaultdict(
@@ -236,6 +228,9 @@ def allocate_to_teams(house_gender_sport_map):
                 
     return team_allocations
 
+def allocate_to_individual_sports():
+    return
+
 def write_allocations_to_excel(team_allocations):
     output_file = os.path.join(os.getcwd(), "allocations.xlsx")
     sport_gender_map = {}
@@ -284,12 +279,15 @@ def write_allocations_to_excel(team_allocations):
 
 input_file = "Cleaned Data All Participants.xlsx"
 data = pd.read_excel(input_file, skiprows=2)
+
+house_mapping = {'Spearheads': 'Green', 'Pioneers': 'Red', 'Trailblzrs': 'Yellow', 'Mavericks': 'Blue'}
+data['House'] = data['House'].replace(house_mapping)
+
 # Temp to generate prioirty
 data['priority'] = np.random.randint(1, 8, size=len(data))
 sports_by_gender = (organize_data_by_gender_and_sport(data))
-houses = allocate_members_to_houses(sports_by_gender)
+#print(len(sports_by_gender['Male']['Cricket']) + len(sports_by_gender['Female']['Cricket']))
+houses = allocate_members_to_houses(sports_by_gender, data)
 house_gender_sport_map = create_house_gender_sport_map(sports_by_gender, houses)
-#print(house_gender_sport_map['Red']['Male']['Volleyball (boys)'])
 teams = allocate_to_teams(house_gender_sport_map)
-print(teams)
 write_allocations_to_excel(teams)
