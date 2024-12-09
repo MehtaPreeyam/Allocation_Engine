@@ -20,3 +20,9 @@ HOUSE_NAMES = {'Green': 'Spearheads', 'Red': 'Pioneers', 'Yellow': 'Trailblazers
 
 individual_sports_boys = ['Badminton', 'Table Tennis', 'Swimming', 'Carrom', 'Chess']
 individual_sports_girls = ['Badminton', 'Table Tennis', 'Swimming', 'Carrom', 'Chess']
+
+group_c_boys_sports_capacities = {'Badminton (singles)': (1, 16), 'Carrom': (1, 32), 'Chess': (1, 32), 'Table Tennis (singles)': (1, 32)}
+group_c_girls_sports_capacities = {'Badminton (singles)': (1, 16), 'Carrom': (1, 16), 'Chess': (1, 8), 'Table Tennis (singles)': (1, 16)}
+
+group_d_boys_sports_capacities = {'Athletics': (1, 1000), 'Pickleball': (1, 25)}
+group_d_girls_sports_capacities = {'Athletics': (1, 1000), 'Pickleball': (1, 100)}
