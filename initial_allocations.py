@@ -19,6 +19,8 @@ import os
 import math
 
 all_user_info = {}
+marquee_status = defaultdict(list)
+yfids_found = set()
 
 def count_members_in_house(houses):
     counter = {}
@@ -65,6 +67,7 @@ def organize_data_by_gender_and_sport(df):
         
         group_c_or_d = str(row["Choose Group C or Group D?"])
         yfid = user_info['Youth Festival ID']
+        yfids_found.add(yfid) # YFID tracking to see if all have been allocated
         all_user_info[yfid] = user_info
         gender = user_info['Gender']
         priority = user_info['Priority']
@@ -106,7 +109,7 @@ def sort_members_by_priority(member_list):
     
     return final_list
 
-def allocate_members_to_houses(members_dict, individual_sport_ordering, df):
+def allocate_members_to_houses(members_dict, individual_sport_ordering, df, marquees_df):
     # Initialize house allocations
     house_allocations = {
         row['REG YFID']: row['House Allotment']
@@ -129,6 +132,72 @@ def allocate_members_to_houses(members_dict, individual_sport_ordering, df):
         }
         for house in HOUSE_COLORS
     }
+    # Initialize marquee tracking: {sport: {gender: {house: count}}}
+    marquee_counts = {
+        sport: {
+            gender: {house: 0 for house in HOUSE_COLORS}
+            for gender in ["Male", "Female"]
+        }
+        for sport in set(marquees_df['2024 Group A Marquee - Sport'].dropna()).union(
+            set(marquees_df['2024 Group B Marquee - Sport'].dropna())
+        )
+    }
+
+    # Update marquee counts for already allocated marquees
+    for yfid, house in house_allocations.items():
+        marquee_row = marquees_df[marquees_df['REG YFID'] == yfid]
+        if marquee_row.empty:
+            continue
+
+        gender = marquee_row.iloc[0].get('Gender')
+        for col in ['2024 Group A Marquee - Sport', '2024 Group B Marquee - Sport']:
+            sport = marquee_row.iloc[0].get(col)
+            if pd.notna(sport) and gender in marquee_counts[sport]:
+                marquee_counts[sport][gender][house] += 1
+
+    # Filter relevant marquee members
+    marquees_df = marquees_df[
+        marquees_df['2024 Group A Marquee - Type'].notna() | marquees_df['2024 Group B Marquee - Type'].notna()
+    ]
+
+    # Allocate new marquees
+    for _, marquee in marquees_df.iterrows():
+        yfid = marquee['REG YFID']
+        # Extract marquee sports
+        marquee_sports = []
+        if pd.notna(marquee.get('2024 Group A Marquee - Type')):
+            marquee_sports.append(marquee.get('2024 Group A Marquee - Sport'))
+            marquee_status[yfid].append((marquee.get('2024 Group A Marquee - Sport'), marquee.get('2024 Group A Marquee - Type')))
+        if pd.notna(marquee.get('2024 Group B Marquee - Type')):
+            marquee_sports.append(marquee.get('2024 Group B Marquee - Sport'))
+            marquee_status[yfid].append((marquee.get('2024 Group B Marquee - Sport'), marquee.get('2024 Group B Marquee - Type')))
+
+        if yfid in house_allocations:
+            continue  # Skip if already allocated
+
+        gender = marquee.get('Gender:')
+        if gender not in ["Male", "Female"]:
+            print(f"Skipping YFID {yfid} due to missing or invalid gender: {gender}")
+            continue
+        
+
+        # Assign to the house with the fewest marquees for the first sport and gender
+        for sport in marquee_sports:
+            if sport not in marquee_counts:
+                print(f"Sport {sport} not found in marquee_counts. Skipping YFID {yfid}.")
+                continue
+
+            # Find the house with the fewest marquee allocations for this sport and gender
+            target_house = min(
+                HOUSE_COLORS,
+                key=lambda house: marquee_counts[sport][gender][house]
+            )
+
+            # Allocate to the target house
+            house_allocations[yfid] = target_house
+            marquee_counts[sport][gender][target_house] += 1
+            print(f"Marquee YFID {yfid} allocated to house {target_house} for sport {sport} (Gender: {gender}).")
+            break  # Move to the next marquee member after allocation
 
     for _, row in df.iterrows():
         if pd.notna(row['House Allotment']):
@@ -141,7 +210,39 @@ def allocate_members_to_houses(members_dict, individual_sport_ordering, df):
                         if member['Youth Festival ID'] == row['Youth Festival ID:']:
                             available_slots[house][gender][sport] -= 1
 
-    # Start Individual house allocs
+    # Assignment process
+    # Priority ordering lists
+    sport_allocation_ordering = {
+        "Co-Ed": ['Cricket'],
+        "Male": ['Football', 'Basketball', 'Volleyball (boys)', 'Ultimate Frisbee'],
+        "Female": ['Football', 'Ultimate Frisbee', 'Basketball', 'Throwball (girls)']
+    }
+
+    for gender, sports_order in sport_allocation_ordering.items():
+        for sport in sports_order:
+            members_in_sport = members_dict.get(gender, {}).get(sport, [])
+            if gender == "Co-Ed":
+                members_in_sport = members_dict['Male'].get(sport, []) + members_dict['Female'].get(sport, [])
+
+            sorted_members = sort_members_by_priority(members_in_sport)
+            for member in sorted_members:
+                if member['Youth Festival ID'] in house_allocations:
+                    continue
+
+                # Allocate to the house with the most slots left for this sport
+                target_house = max(
+                    HOUSE_COLORS,
+                    key=lambda house: available_slots[house][gender][sport]
+                )
+
+                # Check if the house has available slots
+                if available_slots[target_house][gender][sport] > 0:
+                    house_allocations[member['Youth Festival ID']] = target_house
+                    available_slots[target_house][gender][sport] -= 1
+                else:
+                    print(f"Unable to allocate member {member} to sport {sport}")
+
+        # Start Individual house allocs
     sorted_individual_members = sorted(
         individual_sport_ordering.keys(),
         key=lambda x: x[1]  # Sort by priority
@@ -177,38 +278,7 @@ def allocate_members_to_houses(members_dict, individual_sport_ordering, df):
                 print(f"Allocated YFID {yfid} to house {target_house} for sport {sport}.")
                 break  # Exit the sports loop once allocated
     
-    # Assignment process
-    # Priority ordering lists
-    sport_allocation_ordering = {
-        "Co-Ed": ['Cricket'],
-        "Male": ['Football', 'Basketball', 'Volleyball (boys)', 'Ultimate Frisbee'],
-        "Female": ['Football', 'Ultimate Frisbee', 'Basketball', 'Throwball (girls)']
-    }
-
-    for gender, sports_order in sport_allocation_ordering.items():
-        for sport in sports_order:
-            members_in_sport = members_dict.get(gender, {}).get(sport, [])
-            if gender == "Co-Ed":
-                members_in_sport = members_dict['Male'].get(sport, []) + members_dict['Female'].get(sport, [])
-
-            sorted_members = sort_members_by_priority(members_in_sport)
-            for member in sorted_members:
-                if member['Youth Festival ID'] in house_allocations:
-                    continue
-
-                # Allocate to the house with the most slots left for this sport
-                target_house = max(
-                    HOUSE_COLORS,
-                    key=lambda house: available_slots[house][gender][sport]
-                )
-
-                # Check if the house has available slots
-                if available_slots[target_house][gender][sport] > 0:
-                    house_allocations[member['Youth Festival ID']] = target_house
-                    available_slots[target_house][gender][sport] -= 1
-                else:
-                    print(f"Unable to allocate member {member} to sport {sport}")
-
+    
     return house_allocations
 
 
@@ -348,7 +418,7 @@ def write_allocations_to_excel(team_allocations):
     sport_gender_map = {}
     COLUMN_ORDER = [
     "House", "Sport", "Team Number", "Email", "First Name", "Last Name", 
-    "Youth Festival ID", "Gender", "WhatsApp Mobile Number (including country code)", "Age"
+    "Youth Festival ID", "Gender", "WhatsApp Mobile Number (including country code)", "Status", "Age"
     ]
 
     for house, gender_map in team_allocations.items():
@@ -357,6 +427,17 @@ def write_allocations_to_excel(team_allocations):
                 rows = []
                 for team_number, members in teams.items():
                     for member in members:
+                        yfid = member.get("Youth Festival ID")
+                        yfids_found.discard(yfid)
+                        player_status_tuple = marquee_status.get(yfid, None)
+                        player_status = 'Player'
+                        if player_status_tuple:
+                            for sport_status in player_status_tuple:
+                                mq_sport = sport_status[0]
+                                if mq_sport == sport:
+                                    player_status = sport_status[1]
+                                    break
+
                         rows.append({
                             "House": house,
                             "Gender": gender,
@@ -368,7 +449,8 @@ def write_allocations_to_excel(team_allocations):
                             "WhatsApp Mobile Number (including country code)": member.get("WhatsApp Number"),
                             "Gender": member.get("Gender"),
                             "Email": member.get("Email"),
-                            "Age": int(member.get("Age")) if not math.isnan(member.get("Age", float('nan'))) else 0
+                            "Age": int(member.get("Age")) if not math.isnan(member.get("Age", float('nan'))) else 0,
+                            "Status": player_status
                         })
                     rows.append({key: "" for key in COLUMN_ORDER})
 
@@ -412,6 +494,7 @@ def write_individual_allocations_to_excel(individual_allocations):
             for gender, yfids in gender_map.items():
                 rows = []
                 for yfid in yfids:
+                    yfids_found.discard(yfid)
                     user_data = all_user_info.get(yfid, {})
                     rows.append({
                         "House": house,
@@ -446,15 +529,26 @@ def write_individual_allocations_to_excel(individual_allocations):
 
 
 input_file = "Cleaned Data All Participants.xlsx"
+marquee_file = "marquees.xlsx"
 data = pd.read_excel(input_file, skiprows=4)
+marquee_df = pd.read_excel(marquee_file, skiprows=3)
+joined_df = pd.merge(
+        data,
+        marquee_df,
+        on='Youth Festival ID:',
+        how='inner',  # Use 'inner' to include only matching rows
+        suffixes=('_regular', '_marquee')  # Add suffixes to distinguish columns
+    )
+
 house_mapping = {'Spearheads': 'Green', 'Pioneers': 'Red', 'Trailblzrs': 'Yellow', 'Mavericks': 'Blue'}
 data['House Allotment'] = data['House Allotment'].replace(house_mapping)
 
 sports_by_gender, individual_sport_gender_dict, individual_sport_ordering = (organize_data_by_gender_and_sport(data))
-#print(len(sports_by_gender['Male']['Cricket']) + len(sports_by_gender['Female']['Cricket']))
-houses = allocate_members_to_houses(sports_by_gender, individual_sport_ordering, data)
+
+houses = allocate_members_to_houses(sports_by_gender, individual_sport_ordering, data, joined_df)
 house_gender_sport_map = create_house_gender_sport_map(sports_by_gender, houses)
 teams = allocate_to_teams(house_gender_sport_map)
 individual_teams = allocate_individuals_to_sports(individual_sport_ordering, houses)
 write_allocations_to_excel(teams)
 write_individual_allocations_to_excel(individual_teams)
+print(yfids_found)

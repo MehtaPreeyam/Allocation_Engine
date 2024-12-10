@@ -13,3 +13,7 @@ from sports_constants import (
 import random
 import os
 
+input_file = "Cleaned Data All Participants.xlsx"
+data = pd.read_excel(input_file, skiprows=4)
+house_mapping = {'Spearheads': 'Green', 'Pioneers': 'Red', 'Trailblzrs': 'Yellow', 'Mavericks': 'Blue'}
+data['House Allotment'] = data['House Allotment'].replace(house_mapping)
