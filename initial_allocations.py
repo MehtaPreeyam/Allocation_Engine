@@ -10,7 +10,6 @@ from sports_constants import (
     group_c_girls_sports_capacities,
     group_d_boys_sports_capacities,
     group_d_girls_sports_capacities,
-    co_ed_sports,
     HOUSE_COLORS,
     HOUSE_NAMES,
 )
@@ -121,14 +120,13 @@ def allocate_members_to_houses(members_dict, individual_sport_ordering, df, marq
     capacities = {
         "Male": {**group_a_boys_capacities, **group_b_boys_capacities, **group_c_boys_sports_capacities, **group_d_boys_sports_capacities},
         "Female": {**group_a_girls_capacities, **group_b_girls_capacities, **group_c_girls_sports_capacities, **group_d_girls_sports_capacities},
-        "Co-Ed": {**co_ed_sports}
     }
 
     # Track available slots per sport per house
     available_slots = {
         house: {
             gender: {sport: capacity[1] * capacity[0] for sport, capacity in capacities[gender].items()}
-            for gender in ["Male", "Female", "Co-Ed"]
+            for gender in ["Male", "Female"]
         }
         for house in HOUSE_COLORS
     }
@@ -213,9 +211,8 @@ def allocate_members_to_houses(members_dict, individual_sport_ordering, df, marq
     # Assignment process
     # Priority ordering lists
     sport_allocation_ordering = {
-        "Co-Ed": ['Cricket'],
-        "Male": ['Football', 'Basketball', 'Volleyball (boys)', 'Ultimate Frisbee'],
-        "Female": ['Football', 'Ultimate Frisbee', 'Basketball', 'Throwball (girls)']
+        "Male": ['Cricket', 'Football', 'Basketball', 'Volleyball (boys)', 'Ultimate Frisbee'],
+        "Female": ['Cricket', 'Football', 'Ultimate Frisbee', 'Basketball', 'Throwball (girls)']
     }
 
     for gender, sports_order in sport_allocation_ordering.items():
@@ -304,7 +301,6 @@ def allocate_to_teams(house_gender_sport_map):
     capacities = {
         "Male": {**group_a_boys_capacities, **group_b_boys_capacities},
         "Female": {**group_a_girls_capacities, **group_b_girls_capacities},
-        "Co-Ed": {**co_ed_sports}
     }
 
     team_allocations = defaultdict(
@@ -330,7 +326,8 @@ def allocate_to_teams(house_gender_sport_map):
                         team_counters[team_number] += 1
                     else:
                         print(f"Cannot allocate {member} to {sport} (House: {house}, Team: {team_number}) - Capacity Full")
-
+    return team_allocations
+"""
     for sport in capacities['Co-Ed']:
         total_teams, players_per_team = capacities["Co-Ed"][sport]
         for house in house_gender_sport_map:
@@ -345,8 +342,7 @@ def allocate_to_teams(house_gender_sport_map):
                     team_counters[team_number] += 1
                 else:
                     print(f"Cannot allocate {member} to {sport} (House: {house}, Team: {team_number}) - Capacity Full")
-                
-    return team_allocations
+"""             
 
 def allocate_individuals_to_sports(individual_sport_ordering, house_allocations):
     capacities = {
@@ -412,20 +408,38 @@ def allocate_individuals_to_sports(individual_sport_ordering, house_allocations)
 
     return sport_allocations
 
-
-def write_allocations_to_excel(team_allocations):
-    output_file = os.path.join(os.getcwd(), "allocations.xlsx")
+def write_combined_allocations_to_excel(team_allocations, individual_allocations):
+    output_file = os.path.join(os.getcwd(), "combined_allocations.xlsx")
     sport_gender_map = {}
     COLUMN_ORDER = [
-    "House", "Sport", "Team Number", "Email", "First Name", "Last Name", 
-    "Youth Festival ID", "Gender", "WhatsApp Mobile Number (including country code)", "Status", "Age"
+        "House", "Sport", "Team/Player Number", "Email", "First Name", "Last Name", 
+        "Youth Festival ID", "Gender", "WhatsApp Mobile Number (including country code)", "Status", "Age"
     ]
+    gender_mapping = {'Male': 'boys', 'Female': 'girls'}
 
+    # Capacity dictionaries
+    capacities = {
+        "Male": {**group_a_boys_capacities, **group_b_boys_capacities, **group_c_boys_sports_capacities, **group_d_boys_sports_capacities},
+        "Female": {**group_a_girls_capacities, **group_b_girls_capacities, **group_c_girls_sports_capacities, **group_d_girls_sports_capacities},
+    }
+
+    # Process team allocations
     for house, gender_map in team_allocations.items():
         for gender, sports_map in gender_map.items():
             for sport, teams in sports_map.items():
                 rows = []
-                for team_number, members in teams.items():
+                parsed_gender = gender_mapping[gender]
+                sport_with_gender = sport
+                if parsed_gender not in sport:
+                    sport_with_gender = f'{sport} ({parsed_gender})'
+
+                # Get sport capacity
+                total_teams, players_per_team = capacities[gender].get(sport, (0, 0))
+
+                # Process each team
+                for team_number in range(1, total_teams + 1):
+                    members = teams.get(team_number, [])
+                    # Add allocated members
                     for member in members:
                         yfid = member.get("Youth Festival ID")
                         yfids_found.discard(yfid)
@@ -441,8 +455,8 @@ def write_allocations_to_excel(team_allocations):
                         rows.append({
                             "House": house,
                             "Gender": gender,
-                            "Sport": sport,
-                            "Team Number": team_number,
+                            "Sport": sport_with_gender,
+                            "Team/Player Number": team_number,
                             "First Name": member.get("First Name"),
                             "Last Name": member.get("Last Name"),
                             "Youth Festival ID": member.get("Youth Festival ID"),
@@ -452,60 +466,78 @@ def write_allocations_to_excel(team_allocations):
                             "Age": int(member.get("Age")) if not math.isnan(member.get("Age", float('nan'))) else 0,
                             "Status": player_status
                         })
-                    rows.append({key: "" for key in COLUMN_ORDER})
 
-                    # Convert rows to a DataFrame
-                if((gender, sport) not in sport_gender_map):
+                    # Add blank rows for unfilled spots
+                    remaining_spots = players_per_team - len(members)
+                    for _ in range(remaining_spots):
+                        rows.append({
+                            "House": house,
+                            "Gender": gender,
+                            "Sport": sport_with_gender,
+                            "Team/Player Number": team_number,
+                            "First Name": "",
+                            "Last Name": "",
+                            "Youth Festival ID": "",
+                            "WhatsApp Mobile Number (including country code)": "",
+                            "Gender": "",
+                            "Email": "",
+                            "Age": "",
+                            "Status": ""
+                        })
+
+                    rows.append({key: "" for key in COLUMN_ORDER})  # Blank row between teams
+
+                # Append rows to sport_gender_map
+                if (gender, sport) not in sport_gender_map:
                     sport_gender_map[(gender, sport)] = []
                 sport_gender_map[(gender, sport)].extend(rows)
-
-    with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-        for sport, gender in sport_gender_map:
-            rows = sport_gender_map[(sport, gender)]
-            df = pd.DataFrame(rows, dtype=str)
-            df = df[COLUMN_ORDER]
-
-            # Write to a sheet named after the sport
-            sheet_name = f"{sport[:28]} ({gender})"  # Sheet names limited to 31 chars
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-
-    print(f"Team allocations written to {output_file}")
-
-def write_individual_allocations_to_excel(individual_allocations):
-    """
-    Writes individual sport allocations to an Excel file.
-
-    Parameters:
-        individual_allocations (dict): A dictionary containing individual sport allocations.
-        all_user_info (dict): A dictionary mapping YFID to user data.
-    """
-    output_file = os.path.join(os.getcwd(), "individual_allocations.xlsx")
-    COLUMN_ORDER = [
-        "House", "Sport", "Email", "First Name", "Last Name",
-        "Youth Festival ID", "Gender", "WhatsApp Mobile Number (including country code)", "Age"
-    ]
-
-    sport_gender_map = {}
 
     # Process individual allocations
     for sport, house_map in individual_allocations.items():
         for house, gender_map in house_map.items():
             for gender, yfids in gender_map.items():
                 rows = []
+                player_count = 0
+                parsed_gender = gender_mapping[gender]
+                sport_with_gender = f'{sport} ({parsed_gender})'
+
+                # Get sport capacity for individual allocations
+                total_teams, players_per_team = capacities[gender].get(sport, (0, 0))  # Total slots for the sport
+
                 for yfid in yfids:
                     yfids_found.discard(yfid)
                     user_data = all_user_info.get(yfid, {})
+                    player_count += 1
                     rows.append({
                         "House": house,
-                        "Sport": sport,
+                        "Sport": sport_with_gender,
+                        "Team/Player Number": player_count,
                         "First Name": user_data.get("First Name", ""),
                         "Last Name": user_data.get("Last Name", ""),
                         "Youth Festival ID": yfid,
                         "Gender": user_data.get("Gender", ""),
                         "WhatsApp Mobile Number (including country code)": user_data.get("WhatsApp Number", ""),
                         "Email": user_data.get("Email", ""),
-                        "Age": int(user_data.get("Age")) if not math.isnan(user_data.get("Age", float('nan'))) else 0
+                        "Age": int(user_data.get("Age")) if not math.isnan(user_data.get("Age", float('nan'))) else 0,
+                        "Status": ""
+                    })
+
+                # Add blank rows for unfilled spots
+                remaining_slots = players_per_team - player_count
+                for _ in range(remaining_slots):
+                    player_count += 1
+                    rows.append({
+                        "House": house,
+                        "Sport": sport_with_gender,
+                        "Team/Player Number": player_count,
+                        "First Name": "",
+                        "Last Name": "",
+                        "Youth Festival ID": "",
+                        "Gender": "",
+                        "WhatsApp Mobile Number (including country code)": "",
+                        "Email": "",
+                        "Age": "",
+                        "Status": ""
                     })
 
                 rows.append({key: "" for key in COLUMN_ORDER})  # Add a blank row between groups
@@ -517,16 +549,16 @@ def write_individual_allocations_to_excel(individual_allocations):
 
     # Write to Excel
     with pd.ExcelWriter(output_file, engine="openpyxl") as writer:
-        for (gender, sport), rows in sport_gender_map.items():
+        for sport, gender in sport_gender_map:
+            rows = sport_gender_map[(sport, gender)]
             df = pd.DataFrame(rows, dtype=str)
-            df = df[COLUMN_ORDER]  # Ensure column order matches the specified order
+            df = df[COLUMN_ORDER]
 
-            # Create a sheet name with sport and gender
-            sheet_name = f"{sport[:28]} ({gender})"  # Limit sheet names to 31 characters
+            # Write to a sheet named after the sport
+            sheet_name = f"{sport[:28]} ({gender})"  # Sheet names limited to 31 chars
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    print(f"Individual allocations written to {output_file}")
-
+    print(f"Combined team and individual allocations written to {output_file}")
 
 input_file = "Cleaned Data All Participants.xlsx"
 marquee_file = "marquees.xlsx"
@@ -549,6 +581,5 @@ houses = allocate_members_to_houses(sports_by_gender, individual_sport_ordering,
 house_gender_sport_map = create_house_gender_sport_map(sports_by_gender, houses)
 teams = allocate_to_teams(house_gender_sport_map)
 individual_teams = allocate_individuals_to_sports(individual_sport_ordering, houses)
-write_allocations_to_excel(teams)
-write_individual_allocations_to_excel(individual_teams)
+write_combined_allocations_to_excel(teams, individual_teams)
 print(yfids_found)
